@@ -1,0 +1,11 @@
+conda activate myenv
+E:
+cd 电赛\一维板球\NNPID\QLearning\QLearning-经验回放2
+python QLearning-经验回放2.py
+
+
+
+
+E:
+cd 电赛\一维板球\NNPID\QLearning\QLearning-经验回放2
+python plot.py
