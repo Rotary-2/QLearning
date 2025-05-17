@@ -79,13 +79,15 @@ def update(frame):
         heat_red = np.zeros((grid_size, grid_size))
         heat_blue = np.zeros((grid_size, grid_size))
 
-        for p, v, a, q in zip(positions, velocities, actions, q_values):
+        for p, v, a in zip(positions, velocities, actions):
             px = int((p + 1) / 2 * (grid_size - 1))
             vy = int((v + 1) / 2 * (grid_size - 1))
             if a < 0:
-                heat_red[vy][px] += q
+                heat_red[vy][px] = abs(a)
+                heat_blue[vy][px] = 0  # 避免叠加
             else:
-                heat_blue[vy][px] += q
+                heat_blue[vy][px] = abs(a)
+                heat_red[vy][px] = 0  # 避免叠加
 
         ax2.imshow(heat_red, cmap='Reds', origin='lower', extent=[-1, 1, -1, 1], alpha=0.6)
         ax2.imshow(heat_blue, cmap='Greens', origin='lower', extent=[-1, 1, -1, 1], alpha=0.6)
@@ -103,7 +105,23 @@ def update(frame):
         ax2.set_xlabel('Position')
         ax2.set_ylabel('Velocity')
 
-        # 图3保留 metrics.csv 可选（此处略）
+        # Ax3: Training Metrics (full range)
+                # 图3：Training Metrics（使用完整数据）
+        steps = list(range(len(rewards)))
+        window_size = 50
+        avg_rewards = [np.mean(rewards[max(0, i - window_size + 1):i + 1]) for i in range(len(rewards))]
+        td_errors = [float(row['td_error']) for row in data]  # 从CSV读取td_error数据
+        avg_td_errors = [np.mean(td_errors[max(0, i - window_size + 1):i + 1]) for i in range(len(td_errors))]
+        avg_actions = [np.mean(actions[max(0, i - window_size + 1):i + 1]) for i in range(len(rewards))]
+
+        ax3.plot(steps, avg_rewards, color='blue', label='Avg Reward')
+        ax3.plot(steps, avg_td_errors, color='green', label='Avg TD Error')  # 替换center_rate为td_error
+        ax3.plot(steps, avg_actions, color='red', label='Avg Action')
+
+        ax3.set_title(f'Training Metrics (Step={steps[-1]}, Avg Reward={avg_rewards[-1]:.2f}, Avg TD Error={avg_td_errors[-1]:.2f})')
+        ax3.set_xlabel('Step')
+        ax3.set_ylabel('Metrics')
+        ax3.legend()
 
         plt.tight_layout()
 

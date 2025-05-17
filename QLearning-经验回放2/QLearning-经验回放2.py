@@ -11,7 +11,7 @@ import threading
 
 csv_file = open("log.csv", mode='w', newline='')
 csv_writer = csv.writer(csv_file)
-csv_writer.writerow(["time", "reward", "position", "velocity", "acceleration", "action", "Q_value"])
+csv_writer.writerow(["time", "reward", "position", "velocity", "acceleration", "action", "Q_value", "td_error"])
 start_time = time.time()
 
 metrics_file = open("metrics.csv", mode='w', newline='')
@@ -37,7 +37,7 @@ while True:
 # --------------------------- Q-learning 参数 ----------------------------
 ALPHA = 0.1         # 学习率
 GAMMA = 0.85        # 折扣因子
-EPSILON = 0.4       # 探索率
+EPSILON = 0.8     # 探索率
 EPSILON_DECAY = 0.995
 EPSILON_MIN = 0.01
 
@@ -61,6 +61,11 @@ MAX_VELOCITY = 500
 REPLAY_BUFFER_SIZE = 1000  # 经验回放缓冲区大小
 BATCH_SIZE = 32            # 每次回放的批次大小
 replay_buffer = deque(maxlen=REPLAY_BUFFER_SIZE)  # 经验回放缓冲区
+
+# 在参数部分添加
+TD_ERROR_WINDOW_SIZE = 100  # 用于计算TD误差移动平均的窗口大小
+td_error_window = deque(maxlen=TD_ERROR_WINDOW_SIZE)
+EPSILON_DYNAMIC_FACTOR = 1.5  # TD误差对探索率的影响系数（可调）
 
 # --------------------------- 改进的状态离散函数 ----------------------------
 def discretize_state(position, velocity, acceleration):
@@ -132,10 +137,16 @@ def compute_reward(position, velocity):
 # --------------------------- 选择动作（epsilon贪婪） ----------------------------
 def choose_action(state):
     if random.random() < EPSILON:
+        # print(f"[探索] ε={EPSILON:.3f}, 随机选择动作")
         return random.choice(ACTIONS)
+    
     if state not in Q_table:
         Q_table[state] = np.zeros(len(ACTIONS))
-    best_index = int(np.argmax(Q_table[state]))
+        # print(f"[新状态] 随机初始化动作")
+        return random.choice(ACTIONS)
+    
+    best_index = np.argmax(Q_table[state])
+    # print(f"[利用] ε={EPSILON:.3f}, 选择Q值最大动作")
     return ACTIONS[best_index]
 
 # --------------------------- 增强的经验回放 ----------------------------
@@ -172,13 +183,17 @@ def receive_from_stm32():
         acceleration = float(parts[2])
         
         # 限幅
-        position = max(min(position, 250), -250)
-        velocity = max(min(velocity, 500), -500)
+        # position = max(min(position, 300), -200)
+        if position < -300:
+            position = -300
+        if position > 200:
+            position = 200
+        velocity = max(min(velocity, 100), -100)
         acceleration = max(min(acceleration, 1000), -1000)
 
         # 归一化
-        norm_position = position / 250
-        norm_velocity = velocity / 500
+        norm_position = (position + 50) / 250
+        norm_velocity = velocity / 100
         norm_acceleration = acceleration / 1000
 
         return norm_position, norm_velocity, norm_acceleration
@@ -256,6 +271,22 @@ def train_step(position, velocity, acceleration):
     td_error = td_target - Q_table[state][action_index]
     Q_table[state][action_index] += ALPHA * td_error
 
+    # 记录TD误差到滑动窗口
+    td_error_window.append(abs(td_error))
+
+    # 动态调整探索率
+    if len(td_error_window) == TD_ERROR_WINDOW_SIZE:
+        avg_td_error = np.mean(td_error_window)
+        # 标准化TD误差（假设最大TD误差约为10，根据实际情况调整）
+        normalized_error = avg_td_error / 10  
+        # 动态调整：误差越大，探索率越高（但不超过EPSILON初始值）
+        EPSILON = min(EPSILON * EPSILON_DECAY * (1 + EPSILON_DYNAMIC_FACTOR * normalized_error), 0.8)
+    else:
+        EPSILON = min(EPSILON * EPSILON_DECAY, 0.8)
+
+    # 确保探索率不低于最小值
+    EPSILON = max(EPSILON, EPSILON_MIN)
+
     # 执行经验回放
     replay_experience()
 
@@ -266,7 +297,7 @@ def train_step(position, velocity, acceleration):
 
     timestamp = time.time() - start_time
     q_value = Q_table[state][action_index] if state in Q_table else 0
-    csv_writer.writerow([timestamp, reward, position, velocity, acceleration, action, q_value])
+    csv_writer.writerow([timestamp, reward, position, velocity, acceleration, action, q_value, abs(td_error)])
     csv_file.flush()
 
 running = True
